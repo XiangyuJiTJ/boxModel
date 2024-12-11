@@ -1,0 +1,317 @@
+%% This is the main program of the Box-Model
+%% 2024-07-16：尝试加入Bjerknes反馈，即温跃层深度变浅到达某一阈值时，开启Bjerknes反馈
+%% 2024-07-23：添加从data文件夹和BoxForce文件夹中读取不同驱动数据的选择
+%% 2024-07-24：需要修改，开头8行部分，62行和84Depth部分，
+%% 2024-07-29：更新了y0的初始温度，以及新的stack驱动数据
+%% 2024-08-05：输出变量加入Tv和Q
+%% 2024-08-07：使用混合层温度倾向方程作为Bjerknes方案
+%% 2024-08-12：测试幂函数的Bjerknes方案
+%% 2024-08-15：修改Q的计算方案
+%% 2024-08-18：更新T1stack初始温度为UK37法的温度
+%% 2024-09-21：更新了w和h的确定方式
+%% 2024-11-21：更新了w和h
+clc;clear;close all;
+tic;
+
+% s ='CESM';
+% k=600;
+% Maxyear = 3101;
+% Maxyear = 3001;
+Maxyear = 31001;
+
+%% 修改驱动数据
+Result={};
+%% 从data里面读取EBM数据
+for x=17:17
+folder_path = 'data';
+s = num2str(x);
+file_name_T1 = sprintf('%d-T1.txt', x);
+file_name_T2 = sprintf('%d-T2.txt', x);
+file_name_T3 = sprintf('%d-T3.txt', x);
+file_path_T1 = fullfile(folder_path, file_name_T1);
+file_path_T2 = fullfile(folder_path, file_name_T2);
+file_path_T3 = fullfile(folder_path, file_name_T3);
+T1_EBM = load(file_path_T1);
+T2_EBM = load(file_path_T2);
+T3_EBM = load(file_path_T3);
+Teq=(T1_EBM+T2_EBM)/2;
+Force = Teq-T3_EBM;
+Tmid=T3_EBM;
+y0=[1.140742044 0.859257956 0 0.786723536]; %stack Data - 3100kyr (2024-08-18)
+
+%% 从BoxForce里面读取CESM
+% input_folder = 'BoxForce';
+% data_name='CESM-Tm-3Ma.txt';
+% data2_name='CESM-Teq-3Ma.txt';
+% data3_name='CESM-Tmid-3Ma.txt';
+% % y0=[1.054292114	0.945707886	0	0.600607252]; %CESM - 3000kyr
+% input_file = fullfile(input_folder, data_name);
+% input_file2 = fullfile(input_folder, data2_name);
+% input_file3 = fullfile(input_folder, data3_name);
+% Force = load(input_file);
+% Teq=load(input_file2);
+% Tmid=load(input_file3);
+
+%% 从BoxForce里面读取stack数据
+% data_name='stack-Tm-3.1Ma.txt';
+% data2_name='stack-Teq-3.1Ma.txt';
+% data3_name='stack-Tmid-3.1Ma.txt';
+% y0=[1.140742044	0.859257956	1	0.786723536]; %stack Data - 3100kyr (2024-08-18)
+% input_file = fullfile(input_folder, data_name);
+% input_file2 = fullfile(input_folder, data2_name);
+% input_file3 = fullfile(input_folder, data3_name);
+% Force = load(input_file);
+% Teq=load(input_file2);
+% Tmid=load(input_file3);
+
+%---------------------------------------------------------------------------------------------------------------------
+% Parameters
+Box_para=[0.48,772,0.6,36; %1
+        0.1,772,0.6,36; %2 Ep
+        0.9,772,0.6,36; %3
+        0.48,100,0.6,36; %4 Tau_r
+        0.48,1852,0.6,36; %5
+        0.48,772,0.1,36; %6 Tau
+        0.48,772,1,36; %7
+        0.48,772,0.6,1; %8 M
+        0.48,772,0.6,100]; %9 05-28
+
+WH_para=[24.86819079	1.029611385
+        7,3.22; %1 w;h
+        950,100; %2 
+        1800,10; %3
+        10,200;]; %4
+
+% Bjerknes方案1所需参数（暂时不用）
+% Bjerknes_CESM_para=[2.8, 2.9, 3.0, 3.1, 3.2, 3.3]; %粗试
+% Bjerknes_CESM_para=[2.73, 2.74, 2.75,2.76, 2.77, 2.78]; %细调
+% Bjerknes_stack_para=[1.85, 1.88, 1.92, 1.95, 1.98, 2.01];
+% Bjerknes_EBME17_para=[13.6, 13.7, 13.8, 13.9];
+% Bjerknes_EBME18_para=[11.4, 11.47, 11.54, 11.6];
+% Bjerknes_T2_para=[0.8,0.85,0.9,0.95];
+% Bjerknes_T2_para=[0.935,0.95,0.965,0.98];
+
+T1_BoxNoDim(1)=y0(1);
+T2_BoxNoDim(1)=y0(2);
+T3_BoxNoDim(1)=y0(3);
+T4_BoxNoDim(1)=y0(4);
+
+%---------------------------------------------------------------------------------------------------------------------
+%Part2. Start the parameter loop
+%     Result={};
+% B=1;
+% for d=1:6
+% for d=1:4
+% for d=1:1
+%     BjnerkDepth=Bjerknes_CESM_para(d); %d=1:6
+%     BjnerkDepth=Bjerknes_stack_para(d); %d=1:6
+%     BjnerkDepth=Bjerknes_EBME17_para(d); %d=1:4
+%     BjnerkDepth=Bjerknes_EBME18_para(d); %d=1:4
+    for n=1:1
+        we=n;
+%     for n=1:1
+%     tBjerknes=Bjerknes_T2_para(n); %d=1:4
+
+
+    for p=1:1
+        w=WH_para(p,1);
+        h=WH_para(p,2);
+%         Result={};
+        for j=1:1
+            Ep=Box_para(j,1);
+            Tau_r=Box_para(j,2);
+            Tau=Box_para(j,3);
+            M=Box_para(j,4);
+    
+            matrix_name_T1 = sprintf('E%s_WH%d_Para%d_T1Box', s, p, j);
+            matrix_name_T2 = sprintf('E%s_WH%d_Para%d_T2Box', s, p, j);
+            matrix_name_T3 = sprintf('E%s_WH%d_Para%d_T3Box', s, p, j);
+            matrix_name_T4 = sprintf('E%s_WH%d_Para%d_T4Box', s, p, j);
+            matrix_name_OHC = sprintf('E%s_WH%d_Para%d_OHC', s, p, j);
+            matrix_name_twt_OHC = sprintf('E%s_WH%d_Para%d_twt_OHC', s, p, j);
+            matrix_name_Tzonal = sprintf('E%s_WH%d_Para%d_Tzonal', s, p, j);
+            matrix_name_Tmeridional = sprintf('E%s_WH%d_Para%d_Tmeridional', s, p, j);
+            matrix_name_Tz_m = sprintf('E%s_WH%d_Para%d_Tz_m', s, p, j);
+            matrix_name_Tvertical=sprintf('E%s_WH%d_Para%d_Tvertical', s, p, j);
+            matrix_name_Q=sprintf('E%s_WH%d_Para%d_Q', s, p, j);
+            Q=0;
+            matrix_name_Force=sprintf('E%s_WH%d_Para%d_Force', s, p, j);
+
+    %Part3. Main function part
+                for i=1:Maxyear
+                    u_W=(T1_BoxNoDim(i)-T2_BoxNoDim(i))*w;       
+                    u_H=((T1_BoxNoDim(i)+T2_BoxNoDim(i))/2-T3_BoxNoDim(i))*h;
+                    A_w(i)=u_W;
+                    A_h(i)=u_H;
+                    q1(i)=u_W*(T1_BoxNoDim(i)-T2_BoxNoDim(i));
+                    q2(i)=u_H*((T1_BoxNoDim(i)+T2_BoxNoDim(i))/2-T3_BoxNoDim(i));
+                    para_uH(i)=u_H;
+                    Teq(i)=(T1_BoxNoDim(i)+T2_BoxNoDim(i))/2;
+                    Tmm(i)=(T1_BoxNoDim(i)+T2_BoxNoDim(i))/2-T3_BoxNoDim(i);
+                    Tzz(i)=(T1_BoxNoDim(i)-T2_BoxNoDim(i));
+                    q(i)=u_W*(T1_BoxNoDim(i)-T2_BoxNoDim(i))+u_H*((T1_BoxNoDim(i)+T2_BoxNoDim(i))/2-T3_BoxNoDim(i));
+                    tspan=[0 3];    
+                    Force_input=Force(i);
+%                     option=odeset('MaxStep',5*(1e-4));
+                    option=odeset('MaxStep',1e-2);
+                    y0=double(y0);
+%                     [t,T] = ode45(@(t,T) SSTf(t,T,u_W,u_H,Force_input,M,Tau,Tau_r,Ep),tspan,y0,option);
+                 [t,T] =ode45(@(t,T)SSTf(t,T,u_W,u_H,Force_input,M,Tau,Tau_r,Ep,we),tspan,y0,option);%开启Bjerknes反馈
+                    % [t,T] = ode45(@(t,T) SSTf(t,T,u_W,u_H,Force_input,M,Tau,Tau_r),tspan,y0,option);
+
+% calculate the depth of twt, deciding whether to start Bjerknes feeback
+%                     T1_Nodim_1year=T(end,1); 
+%                     T2_Nodim_1year=T(end,2); 
+%                     T3_Nodim_1year=T(end,3); 
+%                     T4_Nodim_1year=T(end,4); 
+%     [TWT_Depth]=BoxFunc_Dimensionalize_Ver3(T1_Nodim_1year,T2_Nodim_1year,T3_Nodim_1year,T4_Nodim_1year,Teq,Tmid,i);
+
+%     if i>100 
+%         if TWT_Depth > BjnerkDepth
+%             B = tBjerknes;
+%             disp('now is');
+%             disp(Maxyear-i);
+%             disp('year');
+%         else
+%             B = 1; 
+%         end
+%     else
+%         B = 1; 
+%     end
+
+%                   save temperature of one model year(nondimensional)
+                    T1_BoxNoDim(i+1)=T(end,1);  
+                    T2_BoxNoDim(i+1)=T(end,2);
+                    T3_BoxNoDim(i+1)=T(end,3);
+                    T4_BoxNoDim(i+1)=T(end,4);
+
+%                     T1_BoxNoDim(i+1)=T(k,1);  
+%                     T2_BoxNoDim(i+1)=T(k,2);
+%                     T3_BoxNoDim(i+1)=T(k,3);
+%                     T4_BoxNoDim(i+1)=T(k,4);
+
+%                     T1_QNoDim=T1_BoxNoDim(i+1);
+%                     T2_QNoDim=T2_BoxNoDim(i+1);
+%                     T3_QNoDim=T3_BoxNoDim(i+1);
+%                     T1_QNoDim=T(end,1);
+%                     T2_QNoDim=T(end,2);
+%                     T3_QNoDim=T(end,3); 
+%                     [Q_NoDim]=BoxFunc_Q(T1_QNoDim,T2_QNoDim,T3_QNoDim,Force_input,w,h,Tau_r);
+%                     Q(i)=Q_NoDim;
+                    Teq_BoxNoDim(i+1)=(T1_BoxNoDim(i+1)+T2_BoxNoDim(i+1))/2;
+                    Q(i)=A_w(i)*(T1_BoxNoDim(i+1)-T2_BoxNoDim(i+1))+A_h(i)*(Teq_BoxNoDim(i+1)-T3_BoxNoDim(i+1));
+                 end
+            
+            T1_BoxNoDim(1)=[];  
+            T2_BoxNoDim(1)=[];
+            T3_BoxNoDim(1)=[];
+            T4_BoxNoDim(1)=[];
+
+%             [Q_NoDim]=BoxFunc_Q_ver2(T1_QNoDim,T2_QNoDim,T3_QNoDim,A_w,A_h);
+
+            assignin('base', matrix_name_Force, Force);
+            
+            Q=Q';    
+            assignin('base', matrix_name_Q, Q);
+
+    [T1_Box,T2_Box,T3_Box,T4_Box]=BoxFunc_Dimensionalize_Ver2(T1_BoxNoDim,T2_BoxNoDim,T3_BoxNoDim,T4_BoxNoDim,Teq,Tmid,Maxyear);    
+
+            T1_Box=T1_Box';
+            T2_Box=T2_Box';
+            T3_Box=T3_Box';
+            T4_Box=T4_Box';
+            assignin('base', matrix_name_T1, T1_Box);
+            assignin('base', matrix_name_T2, T2_Box);
+            assignin('base', matrix_name_T3, T3_Box);
+            assignin('base', matrix_name_T4, T4_Box);
+    
+    [OHC,twt_OHC]=Boxfunc_OHC(T1_Box,T4_Box,Maxyear);
+            OHC=OHC';
+            twt_OHC=twt_OHC';
+            assignin('base', matrix_name_OHC, OHC);
+            assignin('base', matrix_name_twt_OHC, twt_OHC);
+    
+    Tzonal=T1_Box-T2_Box;
+    Tmeridional=(T1_Box+T2_Box)/2-T3_Box;
+    Tz_m=Tzonal./Tmeridional;
+    Tvertical=(T1_Box+T2_Box)/2-T4_Box;
+            assignin('base', matrix_name_Tzonal, Tzonal);
+            assignin('base', matrix_name_Tmeridional, Tmeridional);
+            assignin('base', matrix_name_Tz_m, Tz_m);
+            assignin('base', matrix_name_Tvertical, Tvertical);
+
+           
+
+            Result{1, end+1}=matrix_name_Force;
+            Result{2, end}=Force;
+            Result{1, end+1}=matrix_name_T1;
+            Result{2, end}=T1_Box;
+            Result{1, end+1}=matrix_name_T2;
+            Result{2, end}=T2_Box;
+            Result{1, end+1}=matrix_name_T3;
+            Result{2, end}=T3_Box;
+            Result{1, end+1}=matrix_name_T4;
+            Result{2, end}=T4_Box;
+            Result{1, end+1}=matrix_name_Tzonal;
+            Result{2, end}=Tzonal;
+            Result{1, end+1}=matrix_name_Tmeridional;
+            Result{2, end}=Tmeridional;
+            Result{1, end+1}=matrix_name_Tvertical;
+            Result{2, end}=Tvertical;
+            Result{1, end+1}=matrix_name_Q;
+            Result{2, end}=Q;
+            Result{1, end+1}=matrix_name_Tz_m;
+            Result{2, end}=Tz_m;
+            Result{1, end+1}=matrix_name_OHC;
+            Result{2, end}=OHC;
+            Result{1, end+1}=matrix_name_twt_OHC;
+            Result{2, end}=twt_OHC;
+            
+
+        end
+        %% Use when you start the experience 11-20
+%         filename = sprintf('E%s_Dep%d_t%d.xlsx', s, d, n);
+%         writematrix(cell2mat(Result(2:end,:)), filename);
+    end
+    end
+
+end
+%         filename = sprintf('E%s.xlsx', s);
+        filename = sprintf('En=%d.xlsx', n);
+        writematrix(cell2mat(Result(2:end,:)), filename);
+
+%% Use when you start the experience 11-20
+% filename = sprintf('E%d.xlsx', x);
+% writematrix(cell2mat(Result(2:end,:)), filename);
+
+% Record the time of this run
+elapsed_time = toc;
+disp(['程序运行时间：', num2str(elapsed_time), ' 秒']);
+
+
+
+%% Part2. Solve the Partial differential equations
+function res=SSTf(~,T,u_W,u_H,Force_input,M,Tau,Tau_r,Ep,we)
+% function res=SSTf(~,T,u_W,u_H,Force_input,M,Tau,Tau_r,Ep)
+% Parameters you could change by need
+m=10.0;
+L=5.0*(10^3)*(10^3); 
+    %some definition of parameters of formulas
+Tau_aH=(L/u_H)*( (((T(1)+T(2))/2)-T(3)) /Force_input); 
+Tau_aW=(L/u_W)*( (T(1)-T(2)) /Force_input); 
+    A_H=Tau_r/Tau_aH; 
+    A_W=Tau_r/Tau_aW;
+
+    T_EQ=(T(1)+T(2))/2;
+    Q_H=A_H*(T_EQ-T(3));
+    Q_W=A_W*(T(1)-T(2));
+    q=Q_H+Q_W;
+    %Partial Differential Equations of the box model
+    res=zeros(4,1);
+    res(1)=1-T(1)+(1-Ep)*q*(T(2)-T(1));
+    res(2)=1-T(2)+q*(T(4)-T(2)); %无Bjerknes方案
+    % res(2)=1-T(2)+q*(T(4)-T(2))-we*(T(2)-T(4)); %Bjerknes线性方案
+%     res(2)=1-T(2)+q*(T(4)-T(2))-we*(T(2)-T(4))^3/2; %Bjerknes幂函数方案
+    res(3)=-(T(3)/Tau)+(1/m)*(1-Ep)*q*(T(1)-T(3))+(1/m)*q*Ep*(T(2)-T(3));
+    res(4)=(1/M)*q*(T(3)-T(4));  
+end
